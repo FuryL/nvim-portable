@@ -230,6 +230,7 @@ jobs:
             -c "lua vim.wait(300000, function() return false end, 500)" \
             +qall! 2>&1 | tail -30
           PLUGIN_COUNT=$(find "${XDG_DATA_HOME}/nvim/lazy" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+          [ -z "$PLUGIN_COUNT" ] && PLUGIN_COUNT=0
           echo "Plugins installed: ${PLUGIN_COUNT}"
           if [ "${PLUGIN_COUNT}" -lt 35 ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
@@ -279,12 +280,38 @@ jobs:
         timeout-minutes: 20
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
-          echo "=== Installing all Mason packages in one session ==="
-          nvim --headless \
-            -c "lua require('lazy').load({ plugins = { 'mason.nvim' } })" \
-            -c "lua require('mason.api.command').MasonInstall({'clangd','lua-language-server','marksman','yamlls','jsonls','neocmake','stylua','clang-format','shfmt','shellcheck','cpplint','markdownlint-cli2','markdown-toc'})" \
-            +qall 2>&1 | tail -30
+          echo "=== Waiting for Mason ensure_installed to complete ==="
+
+          # 写入等待脚本：轮询确认所有包安装完成才退出
+          cat > /tmp/mason-wait.lua << 'LUAEOF'
+          local pkgs = {
+            "clangd","lua-language-server","marksman","yamlls","jsonls","neocmake",
+            "stylua","clang-format","shfmt","shellcheck","cpplint","markdownlint-cli2","markdown-toc"
+          }
+          local registry = require("mason-registry")
+          local deadline = vim.uv.now() + 600000
+          while vim.uv.now() < deadline do
+            local missing = {}
+            for _, pn in ipairs(pkgs) do
+              local ok, pkg = pcall(registry.get_package, pn)
+              if not (ok and pkg and pkg:is_installed()) then
+                table.insert(missing, pn)
+              end
+            end
+            if #missing == 0 then
+              vim.print("All Mason packages installed")
+              break
+            end
+            vim.print("Waiting for " .. #missing .. " packages: " .. table.concat(missing, ", "))
+            vim.wait(5000, function() return false end, 500)
+          end
+          vim.cmd("qa")
+          LUAEOF
+
+          nvim --headless '+luafile /tmp/mason-wait.lua' 2>&1 | tail -40
+
           MASON_COUNT=$(find "${XDG_DATA_HOME}/nvim/mason/packages" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+          [ -z "$MASON_COUNT" ] && MASON_COUNT=0
           echo "Mason packages installed: ${MASON_COUNT}"
           if [ "${MASON_COUNT}" -lt 10 ]; then
             echo "ERROR: Expected ~14 Mason packages, only ${MASON_COUNT} found"
