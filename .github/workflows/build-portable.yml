@@ -279,21 +279,12 @@ jobs:
         timeout-minutes: 20
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
-          for PKG in clangd lua-language-server marksman yamlls jsonls neocmake \
-                     stylua clang-format shfmt \
-                     shellcheck cpplint markdownlint-cli2 markdown-toc; do
-            echo "=== Installing: $PKG ==="
-            nvim --headless \
-              -c "lua require('lazy').load({ plugins = { 'mason.nvim' } })" \
-              -c "MasonInstall $PKG" \
-              -c "lua vim.wait(60000, function() return false end, 500)" \
-              +qall! 2>&1 | tee /tmp/mason-${PKG}.log | tail -5
-            if grep -qiE "installed|already|up.to.date" /tmp/mason-${PKG}.log; then
-              echo "  -> $PKG OK"
-            else
-              echo "  -> WARNING: $PKG may not have installed successfully"
-            fi
-          done
+          echo "=== Installing all Mason packages in one session ==="
+          nvim --headless \
+            -c "lua require('lazy').load({ plugins = { 'mason.nvim' } })" \
+            -c "MasonInstall clangd lua-language-server marksman yamlls jsonls neocmake stylua clang-format shfmt shellcheck cpplint markdownlint-cli2 markdown-toc" \
+            -c "lua vim.wait(600000, function() return false end, 500)" \
+            +qall 2>&1 | tail -30
           MASON_COUNT=$(find "${XDG_DATA_HOME}/nvim/mason/packages" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           echo "Mason packages installed: ${MASON_COUNT}"
           if [ "${MASON_COUNT}" -lt 10 ]; then
