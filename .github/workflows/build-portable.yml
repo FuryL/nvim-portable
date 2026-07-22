@@ -241,8 +241,8 @@ jobs:
         timeout-minutes: 15
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
+          export CC=zigcc
           nvim --headless \
-            -c "lua require('nvim-treesitter.install').compilers = {'zigcc'}" \
             -c "lua require('nvim-treesitter.install').update({ with_sync = true })" \
             -c "lua vim.wait(120000, function() return false end, 500)" \
             +qall! 2>&1 | tail -10
