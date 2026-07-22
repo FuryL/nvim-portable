@@ -86,14 +86,15 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "windows" ]; then
-            curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.zip" -o /tmp/zig.zip
+            curl --fail -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.zip" -o /tmp/zig.zip
             7z x /tmp/zig.zip -o/tmp/zig
             echo "/tmp/zig/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}" >> $GITHUB_PATH
+            "/tmp/zig/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}/zig.exe" version
           else
-            curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.tar.xz" | tar xJ -C /tmp
+            curl --fail -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.tar.xz" | tar xJ -C /tmp
             sudo ln -s /tmp/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}/zig /usr/local/bin/zig
+            zig version
           fi
-          zig version
 
       - name: Create zigcc wrapper (Linux)
         if: matrix.os == 'linux'
@@ -119,9 +120,13 @@ jobs:
           if [ -n "${{ inputs.nvim_version }}" ]; then
             TAG="${{ inputs.nvim_version }}"
           else
-            TAG=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" \
+            TAG=$(curl --fail -sL -H "Authorization: Bearer ${{ github.token }}" \
               "https://api.github.com/repos/${{ matrix.nvim_repo }}/releases/latest" \
               | jq -r '.tag_name')
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "ERROR: Failed to resolve Neovim version from ${{ matrix.nvim_repo }}"
+            exit 1
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${TAG#v}" >> $GITHUB_OUTPUT
@@ -132,21 +137,27 @@ jobs:
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           REPO="${{ matrix.nvim_repo }}"
-          DL_URL=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" \
+          DL_URL=$(curl --fail -sL -H "Authorization: Bearer ${{ github.token }}" \
             "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" \
             | jq -r '.assets[] | select(.name | test("${{ matrix.nvim_asset_pattern }}")) | .browser_download_url')
+          if [ -z "$DL_URL" ] || [ "$DL_URL" = "null" ]; then
+            echo "ERROR: No matching asset '${{ matrix.nvim_asset_pattern }}' in ${REPO} tag ${TAG}"
+            exit 1
+          fi
           echo "Downloading: ${DL_URL}"
-          mkdir -p "${PORTABLE_DIR}/bin"
-          curl -L "$DL_URL" -o /tmp/nvim-archive
+          mkdir -p "${PORTABLE_DIR}"
+          curl --fail -L "$DL_URL" -o /tmp/nvim-archive
           if [ "${{ matrix.os }}" = "windows" ]; then
             7z x /tmp/nvim-archive -o/tmp/nvim-extract -y
-            mv /tmp/nvim-extract/nvim-win64/* "${PORTABLE_DIR}/bin/"
+            mv /tmp/nvim-extract/nvim-win64/* "${PORTABLE_DIR}/"
           else
             mkdir -p /tmp/nvim-extract
             tar xzf /tmp/nvim-archive -C /tmp/nvim-extract
-            mv /tmp/nvim-extract/nvim-*/* "${PORTABLE_DIR}/bin/"
+            mv /tmp/nvim-extract/nvim-*/* "${PORTABLE_DIR}/"
           fi
-          "${PORTABLE_DIR}/bin/nvim" --version 2>/dev/null | head -3 || true
+          NVIM_BIN="${PORTABLE_DIR}/bin/nvim"
+          [ "${{ matrix.os }}" = "windows" ] && NVIM_BIN="${NVIM_BIN}.exe"
+          "${NVIM_BIN}" --version | head -3
 
       - name: Create portable structure
         shell: bash
@@ -207,10 +218,16 @@ jobs:
         timeout-minutes: 10
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
+          which nvim
           nvim --headless '+Lazy! sync' \
             -c "lua vim.wait(300000, function() return false end, 500)" \
-            +qall! 2>&1 | tail -30 || true
-          echo "Plugins: $(ls ${XDG_DATA_HOME}/nvim/lazy/ 2>/dev/null | wc -l)"
+            +qall! 2>&1 | tail -30
+          PLUGIN_COUNT=$(ls "${XDG_DATA_HOME}/nvim/lazy/" 2>/dev/null | wc -l)
+          echo "Plugins installed: ${PLUGIN_COUNT}"
+          if [ "${PLUGIN_COUNT}" -lt 35 ]; then
+            echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
+            exit 1
+          fi
 
       - name: Compile Treesitter parsers
         shell: bash
@@ -221,8 +238,13 @@ jobs:
             -c "lua require('nvim-treesitter.install').compilers = {'zigcc'}" \
             -c "lua require('nvim-treesitter.install').update({ with_sync = true })" \
             -c "lua vim.wait(120000, function() return false end, 500)" \
-            +qall! 2>&1 | tail -10 || true
-          echo "Parsers: $(find ${XDG_DATA_HOME}/nvim -name '*.so' -path '*parser*' 2>/dev/null | wc -l)"
+            +qall! 2>&1 | tail -10
+          PARSER_COUNT=$(find "${XDG_DATA_HOME}/nvim" -name '*.so' -path '*parser*' 2>/dev/null | wc -l)
+          echo "Parsers compiled: ${PARSER_COUNT}"
+          if [ "${PARSER_COUNT}" -lt 5 ]; then
+            echo "ERROR: Expected parsers to be compiled, only ${PARSER_COUNT} found"
+            exit 1
+          fi
 
       - name: Compile C plugins
         if: matrix.os == 'linux'
@@ -236,7 +258,10 @@ jobs:
             DIR="${DIR%/}"
             if [ -f "$DIR/Makefile" ] && [ ! -f "$DIR/.compiled" ]; then
               echo "Compiling: $(basename "$DIR")"
-              (cd "$DIR" && make -j$(nproc) 2>&1 | tail -3) || true
+              if ! (cd "$DIR" && make -j$(nproc) 2>&1 | tail -3); then
+                echo "ERROR: Failed to compile $(basename "$DIR")"
+                exit 1
+              fi
               touch "$DIR/.compiled"
             fi
           done
@@ -253,9 +278,19 @@ jobs:
             nvim --headless \
               "+MasonInstall $PKG" \
               -c "lua vim.wait(60000, function() return false end, 500)" \
-              +qall! 2>&1 | grep -E "installed|failed|Download" | head -3 || true
+              +qall! 2>&1 | tee /tmp/mason-${PKG}.log | tail -5
+            if grep -qiE "installed|already|up.to.date" /tmp/mason-${PKG}.log; then
+              echo "  -> $PKG OK"
+            else
+              echo "  -> WARNING: $PKG may not have installed successfully"
+            fi
           done
-          ls "${XDG_DATA_HOME}/nvim/mason/packages/" 2>/dev/null || true
+          MASON_COUNT=$(ls "${XDG_DATA_HOME}/nvim/mason/packages/" 2>/dev/null | wc -l)
+          echo "Mason packages installed: ${MASON_COUNT}"
+          if [ "${MASON_COUNT}" -lt 10 ]; then
+            echo "ERROR: Expected ~14 Mason packages, only ${MASON_COUNT} found"
+            exit 1
+          fi
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
