@@ -219,11 +219,17 @@ jobs:
         timeout-minutes: 10
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
-          which nvim
+          NVIM_BIN="${PORTABLE_DIR}/bin/nvim"
+          [ "${{ matrix.os }}" = "windows" ] && NVIM_BIN="${NVIM_BIN}.exe"
+          if [ ! -f "$NVIM_BIN" ] || [ ! -x "$NVIM_BIN" ]; then
+            echo "ERROR: nvim not found at $NVIM_BIN"
+            exit 1
+          fi
+          echo "nvim found at: $NVIM_BIN"
           nvim --headless '+Lazy! sync' \
             -c "lua vim.wait(300000, function() return false end, 500)" \
             +qall! 2>&1 | tail -30
-          PLUGIN_COUNT=$(ls "${XDG_DATA_HOME}/nvim/lazy/" 2>/dev/null | wc -l)
+          PLUGIN_COUNT=$(find "${XDG_DATA_HOME}/nvim/lazy" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           echo "Plugins installed: ${PLUGIN_COUNT}"
           if [ "${PLUGIN_COUNT}" -lt 35 ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
@@ -241,6 +247,7 @@ jobs:
             -c "lua vim.wait(120000, function() return false end, 500)" \
             +qall! 2>&1 | tail -10
           PARSER_COUNT=$(find "${XDG_DATA_HOME}/nvim" -name '*.so' -path '*parser*' 2>/dev/null | wc -l)
+          [ -z "$PARSER_COUNT" ] && PARSER_COUNT=0
           echo "Parsers compiled: ${PARSER_COUNT}"
           if [ "${PARSER_COUNT}" -lt 5 ]; then
             echo "ERROR: Expected parsers to be compiled, only ${PARSER_COUNT} found"
@@ -277,7 +284,8 @@ jobs:
                      shellcheck cpplint markdownlint-cli2 markdown-toc; do
             echo "=== Installing: $PKG ==="
             nvim --headless \
-              "+MasonInstall $PKG" \
+              -c "lua require('lazy').load({ plugins = { 'mason.nvim' } })" \
+              -c "MasonInstall $PKG" \
               -c "lua vim.wait(60000, function() return false end, 500)" \
               +qall! 2>&1 | tee /tmp/mason-${PKG}.log | tail -5
             if grep -qiE "installed|already|up.to.date" /tmp/mason-${PKG}.log; then
@@ -286,7 +294,7 @@ jobs:
               echo "  -> WARNING: $PKG may not have installed successfully"
             fi
           done
-          MASON_COUNT=$(ls "${XDG_DATA_HOME}/nvim/mason/packages/" 2>/dev/null | wc -l)
+          MASON_COUNT=$(find "${XDG_DATA_HOME}/nvim/mason/packages" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           echo "Mason packages installed: ${MASON_COUNT}"
           if [ "${MASON_COUNT}" -lt 10 ]; then
             echo "ERROR: Expected ~14 Mason packages, only ${MASON_COUNT} found"
