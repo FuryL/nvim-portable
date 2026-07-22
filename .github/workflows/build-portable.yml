@@ -190,7 +190,8 @@ jobs:
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
-          @"@echo off
+          @"
+          @echo off
           set "DIR=%~dp0"
           if "%DIR:~-1%"=="\" set "DIR=%DIR:~0,-1%"
           set "NVIM_PORTABLE_OFFLINE=1"
@@ -253,16 +254,16 @@ jobs:
         run: |
           export CC=zigcc
           export CXX=zigcc
-          LAZY_DIR="${XDG_DATA_HOME}/nvim/lazy"
-          for DIR in "$LAZY_DIR"/*/; do
-            DIR="${DIR%/}"
-            if [ -f "$DIR/Makefile" ] && [ ! -f "$DIR/.compiled" ]; then
-              echo "Compiling: $(basename "$DIR")"
-              if ! (cd "$DIR" && make -j$(nproc) 2>&1 | tail -3); then
-                echo "ERROR: Failed to compile $(basename "$DIR")"
+          for PLUGIN in telescope-fzf-native.nvim; do
+            DIR="${XDG_DATA_HOME}/nvim/lazy/${PLUGIN}"
+            if [ -d "$DIR" ] && [ -f "$DIR/Makefile" ]; then
+              echo "Compiling: ${PLUGIN}"
+              if ! (cd "$DIR" && make -j$(nproc) 2>&1 | tail -5); then
+                echo "ERROR: Failed to compile ${PLUGIN}"
                 exit 1
               fi
-              touch "$DIR/.compiled"
+            else
+              echo "Skipping: ${PLUGIN} (not found or no Makefile)"
             fi
           done
 
