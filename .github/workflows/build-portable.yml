@@ -282,8 +282,7 @@ jobs:
           echo "=== Installing all Mason packages in one session ==="
           nvim --headless \
             -c "lua require('lazy').load({ plugins = { 'mason.nvim' } })" \
-            -c "MasonInstall clangd lua-language-server marksman yamlls jsonls neocmake stylua clang-format shfmt shellcheck cpplint markdownlint-cli2 markdown-toc" \
-            -c "lua vim.wait(600000, function() return false end, 500)" \
+            -c "lua require('mason.api.command').MasonInstall({'clangd','lua-language-server','marksman','yamlls','jsonls','neocmake','stylua','clang-format','shfmt','shellcheck','cpplint','markdownlint-cli2','markdown-toc'})" \
             +qall 2>&1 | tail -30
           MASON_COUNT=$(find "${XDG_DATA_HOME}/nvim/mason/packages" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           echo "Mason packages installed: ${MASON_COUNT}"
