@@ -229,12 +229,7 @@ jobs:
           nvim --headless '+Lazy! sync' \
             -c "lua vim.wait(300000, function() return false end, 500)" \
             +qall! 2>&1 | tail -30
-          PLUGIN_COUNT=0
-          if [ -d "${XDG_DATA_HOME}/nvim/lazy" ]; then
-            for d in "${XDG_DATA_HOME}/nvim/lazy"/*/; do
-              [ -d "$d" ] && PLUGIN_COUNT=$((PLUGIN_COUNT + 1))
-            done
-          fi
+          PLUGIN_COUNT=$(cd "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null && ls | wc -l || echo 0)
           echo "Plugins installed: ${PLUGIN_COUNT}"
           if [ "${PLUGIN_COUNT}" -lt 35 ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
@@ -279,59 +274,11 @@ jobs:
             fi
           done
 
-      - name: Install Mason packages
+      - name: Mason packages (info)
         shell: bash
-        timeout-minutes: 20
         run: |
-          export PATH="${PORTABLE_DIR}/bin:$PATH"
-          echo "=== Waiting for Mason ensure_installed to complete ==="
-
-          # 写入等待脚本：轮询确认所有包安装完成才退出
-          cat > /tmp/mason-wait.lua << 'LUAEOF'
-          local pkgs = {"clangd","lua-language-server","marksman","yamlls","jsonls","neocmake","stylua","clang-format","shfmt","shellcheck","cpplint","markdownlint-cli2","markdown-toc"}
-          local registry = require("mason-registry")
-          local s = vim.uv.now()
-          while vim.uv.now() - s < 60000 do
-            if pcall(registry.get_all_package_names) then break end
-            vim.wait(500, function() return false end, 50)
-          end
-          -- pre-filter: skip packages with no available versions (e.g. arm64-only missing binaries)
-          local missing = {}
-          for _, pn in ipairs(pkgs) do
-            local ok, pkg = pcall(registry.get_package, pn)
-            if ok and pkg then
-              if not pkg:is_installed() then
-                local versions = pkg:get_versions()
-                if versions and #versions > 0 then
-                  table.insert(missing, pn)
-                else
-                  vim.print("SKIP: " .. pn .. " — no available versions for this platform")
-                end
-              end
-            else
-              vim.print("SKIP: " .. pn .. " — package not in registry")
-            end
-          end
-          if #missing > 0 then
-            vim.print("Installing " .. #missing .. " packages: " .. table.concat(missing, ", "))
-            require("mason.api.command").MasonInstall(missing)
-          end
-          vim.print("Mason installation phase done")
-          vim.cmd("qa")
-          LUAEOF
-
-          nvim --headless '+luafile /tmp/mason-wait.lua' 2>&1
-
-          MASON_COUNT=0
-          if [ -d "${XDG_DATA_HOME}/nvim/mason/packages" ]; then
-            for d in "${XDG_DATA_HOME}/nvim/mason/packages"/*/; do
-              [ -d "$d" ] && MASON_COUNT=$((MASON_COUNT + 1))
-            done
-          fi
-          echo "Mason packages installed: ${MASON_COUNT}"
-          if [ "${MASON_COUNT}" -lt 5 ]; then
-            echo "WARNING: only ${MASON_COUNT} Mason packages installed (< 5)"
-          fi
+          MASON_COUNT=$(cd "${XDG_DATA_HOME}/nvim/mason/packages" 2>/dev/null && ls | wc -l || echo 0)
+          echo "Mason packages: ${MASON_COUNT} (LazyVim ensure_installed handles installation)"
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
