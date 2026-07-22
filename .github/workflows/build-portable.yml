@@ -229,10 +229,11 @@ jobs:
           nvim --headless '+Lazy! sync' \
             -c "lua vim.wait(300000, function() return false end, 500)" \
             +qall! 2>&1 | tail -30
-          shopt -s nullglob
-          dirs=("${XDG_DATA_HOME}/nvim/lazy/"*/)
-          PLUGIN_COUNT=${#dirs[@]}
-          shopt -u nullglob
+          if [ -d "${XDG_DATA_HOME}/nvim/lazy" ]; then
+            PLUGIN_COUNT=$(ls -1 "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null | wc -l)
+          else
+            PLUGIN_COUNT=0
+          fi
           echo "Plugins installed: ${PLUGIN_COUNT}"
           if [ "${PLUGIN_COUNT}" -lt 35 ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
@@ -300,10 +301,19 @@ jobs:
             local ok, pkg = pcall(registry.get_package, pn)
             if not (ok and pkg and pkg:is_installed()) then table.insert(missing, pn) end
           end
-          -- MasonInstall blocks in headless mode, no need to poll
+          -- install missing packages one by one (pcall so one failure doesn't abort others)
           if #missing > 0 then
             vim.print("Installing " .. #missing .. " packages: " .. table.concat(missing, ", "))
-            require("mason.api.command").MasonInstall(missing)
+            for _, pn in ipairs(missing) do
+              local ok, err = pcall(function()
+                require("mason.api.command").MasonInstall({pn})
+              end)
+              if ok then
+                vim.print("  OK: " .. pn)
+              else
+                vim.print("  WARN: " .. pn .. " — " .. tostring(err))
+              end
+            end
           end
           vim.print("All Mason packages installed")
           vim.cmd("qa")
@@ -311,10 +321,11 @@ jobs:
 
           nvim --headless '+luafile /tmp/mason-wait.lua' 2>&1 | tail -40
 
-          shopt -s nullglob
-          mason_dirs=("${XDG_DATA_HOME}/nvim/mason/packages/"*/)
-          MASON_COUNT=${#mason_dirs[@]}
-          shopt -u nullglob
+          if [ -d "${XDG_DATA_HOME}/nvim/mason/packages" ]; then
+            MASON_COUNT=$(ls -1 "${XDG_DATA_HOME}/nvim/mason/packages" 2>/dev/null | wc -l)
+          else
+            MASON_COUNT=0
+          fi
           echo "Mason packages installed: ${MASON_COUNT}"
           if [ "${MASON_COUNT}" -lt 10 ]; then
             echo "ERROR: Expected ~14 Mason packages, only ${MASON_COUNT} found"
