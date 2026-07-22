@@ -1,0 +1,334 @@
+name: Build NVim Portable
+
+on:
+  schedule:
+    - cron: '0 0 * * 6'
+  workflow_dispatch:
+    inputs:
+      nvim_version:
+        description: 'Neovim 版本（如 v0.12.4），留空取最新'
+        required: false
+        type: string
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os: linux
+            arch: x86_64
+            nvim_repo: neovim/neovim-releases
+            nvim_asset_pattern: nvim-linux-x86_64.tar.gz
+            zig_platform: linux-x86_64
+            zig_target: x86_64-linux-gnu.2.17
+            node_platform: linux-x64
+            node_pkg_ext: tar.xz
+            launcher: nvim.sh
+            artifact_ext: tar.gz
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+            nvim_repo: neovim/neovim-releases
+            nvim_asset_pattern: nvim-linux-arm64.tar.gz
+            zig_platform: linux-aarch64
+            zig_target: aarch64-linux-gnu.2.17
+            node_platform: linux-arm64
+            node_pkg_ext: tar.xz
+            launcher: nvim.sh
+            artifact_ext: tar.gz
+          - runner: windows-2022
+            os: windows
+            arch: x86_64
+            nvim_repo: neovim/neovim
+            nvim_asset_pattern: nvim-win64.zip
+            zig_platform: windows-x86_64
+            zig_target: x86_64-windows-gnu
+            node_platform: win-x64
+            node_pkg_ext: zip
+            launcher: nvim.cmd
+            artifact_ext: zip
+
+    runs-on: ${{ matrix.runner }}
+    env:
+      ZIG_VERSION: 0.13.0
+      PORTABLE_DIR: ${{ github.workspace }}/work/portable
+      XDG_CONFIG_HOME: ${{ github.workspace }}/work/portable/config
+      XDG_DATA_HOME: ${{ github.workspace }}/work/portable/data
+      XDG_STATE_HOME: ${{ github.workspace }}/work/portable/state
+      XDG_CACHE_HOME: ${{ github.workspace }}/work/portable/cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl wget jq xz-utils
+
+      - name: Install system deps (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          choco install -y curl jq 2>$null || true
+
+      - name: Install Zig
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.zip" -o /tmp/zig.zip
+            7z x /tmp/zig.zip -o/tmp/zig
+            echo "/tmp/zig/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}" >> $GITHUB_PATH
+          else
+            curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}.tar.xz" | tar xJ -C /tmp
+            sudo ln -s /tmp/zig-${{ matrix.zig_platform }}-${ZIG_VERSION}/zig /usr/local/bin/zig
+          fi
+          zig version
+
+      - name: Create zigcc wrapper (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          cat > /usr/local/bin/zigcc << 'ZIGCCEOF'
+          #!/bin/sh
+          exec zig cc -target TARGET -g0 "$@"
+          ZIGCCEOF
+          sed -i "s|TARGET|${{ matrix.zig_target }}|" /usr/local/bin/zigcc
+          chmod +x /usr/local/bin/zigcc
+
+      - name: Create zigcc wrapper (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          "@echo off`nzig cc -target ${{ matrix.zig_target }} -g0 %*" | Out-File -FilePath "$env:USERPROFILE\zigcc.cmd" -Encoding ASCII
+          echo "$env:USERPROFILE" >> $env:GITHUB_PATH
+
+      - name: Resolve Neovim version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.nvim_version }}" ]; then
+            TAG="${{ inputs.nvim_version }}"
+          else
+            TAG=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" \
+              "https://api.github.com/repos/${{ matrix.nvim_repo }}/releases/latest" \
+              | jq -r '.tag_name')
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          echo "Neovim version: ${TAG}"
+
+      - name: Download Neovim
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          REPO="${{ matrix.nvim_repo }}"
+          DL_URL=$(curl -sL -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" \
+            | jq -r '.assets[] | select(.name | test("${{ matrix.nvim_asset_pattern }}")) | .browser_download_url')
+          echo "Downloading: ${DL_URL}"
+          mkdir -p "${PORTABLE_DIR}/bin"
+          curl -L "$DL_URL" -o /tmp/nvim-archive
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            7z x /tmp/nvim-archive -o/tmp/nvim-extract -y
+            mv /tmp/nvim-extract/nvim-win64/* "${PORTABLE_DIR}/bin/"
+          else
+            mkdir -p /tmp/nvim-extract
+            tar xzf /tmp/nvim-archive -C /tmp/nvim-extract
+            mv /tmp/nvim-extract/nvim-*/* "${PORTABLE_DIR}/bin/"
+          fi
+          "${PORTABLE_DIR}/bin/nvim" --version 2>/dev/null | head -3 || true
+
+      - name: Create portable structure
+        shell: bash
+        run: |
+          mkdir -p "${XDG_CONFIG_HOME}/nvim"
+          mkdir -p "${XDG_DATA_HOME}/nvim"
+          mkdir -p "${XDG_STATE_HOME}/nvim"
+          mkdir -p "${XDG_CACHE_HOME}/nvim"
+          cp nvim-config/.neoconf.json "${XDG_CONFIG_HOME}/nvim/" 2>/dev/null || true
+          cp -r nvim-config/* "${XDG_CONFIG_HOME}/nvim/"
+          echo "${PORTABLE_DIR}/bin" >> $GITHUB_PATH
+
+      - name: Create launcher script (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          cat > "${PORTABLE_DIR}/nvim.sh" << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export NVIM_PORTABLE_OFFLINE=1
+          export XDG_CONFIG_HOME="$DIR/config"
+          export XDG_DATA_HOME="$DIR/data"
+          export XDG_STATE_HOME="$DIR/state"
+          export XDG_CACHE_HOME="$DIR/cache"
+          export PATH="$DIR/bin:$DIR/node/bin:$PATH"
+          exec "$DIR/bin/nvim" "$@"
+          EOF
+          chmod +x "${PORTABLE_DIR}/nvim.sh"
+
+      - name: Create launcher script (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          @"@echo off
+          set "DIR=%~dp0"
+          if "%DIR:~-1%"=="\" set "DIR=%DIR:~0,-1%"
+          set "NVIM_PORTABLE_OFFLINE=1"
+          set "XDG_CONFIG_HOME=%DIR%\config"
+          set "XDG_DATA_HOME=%DIR%\data"
+          set "XDG_STATE_HOME=%DIR%\state"
+          set "XDG_CACHE_HOME=%DIR%\cache"
+          set "PATH=%DIR%\bin;%DIR%\node;%PATH%"
+          "%DIR%\bin\nvim.exe" %*
+          "@ | Out-File -FilePath "${{ env.PORTABLE_DIR }}\nvim.cmd" -Encoding ASCII
+
+      - name: Download Node.js (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          NODE_VER="v16.20.2"
+          NODE_URL="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-${{ matrix.node_platform }}.${{ matrix.node_pkg_ext }}"
+          echo "Downloading Node.js: ${NODE_URL}"
+          curl -L "$NODE_URL" | tar xJ -C /tmp
+          mv /tmp/node-${NODE_VER}-${{ matrix.node_platform }} "${PORTABLE_DIR}/node"
+          "${PORTABLE_DIR}/node/bin/node" --version
+
+      - name: Sync LazyVim plugins
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          export PATH="${PORTABLE_DIR}/bin:$PATH"
+          nvim --headless '+Lazy! sync' \
+            -c "lua vim.wait(300000, function() return false end, 500)" \
+            +qall! 2>&1 | tail -30 || true
+          echo "Plugins: $(ls ${XDG_DATA_HOME}/nvim/lazy/ 2>/dev/null | wc -l)"
+
+      - name: Compile Treesitter parsers
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          export PATH="${PORTABLE_DIR}/bin:$PATH"
+          nvim --headless \
+            -c "lua require('nvim-treesitter.install').compilers = {'zigcc'}" \
+            -c "lua require('nvim-treesitter.install').update({ with_sync = true })" \
+            -c "lua vim.wait(120000, function() return false end, 500)" \
+            +qall! 2>&1 | tail -10 || true
+          echo "Parsers: $(find ${XDG_DATA_HOME}/nvim -name '*.so' -path '*parser*' 2>/dev/null | wc -l)"
+
+      - name: Compile C plugins
+        if: matrix.os == 'linux'
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          export CC=zigcc
+          export CXX=zigcc
+          LAZY_DIR="${XDG_DATA_HOME}/nvim/lazy"
+          for DIR in "$LAZY_DIR"/*/; do
+            DIR="${DIR%/}"
+            if [ -f "$DIR/Makefile" ] && [ ! -f "$DIR/.compiled" ]; then
+              echo "Compiling: $(basename "$DIR")"
+              (cd "$DIR" && make -j$(nproc) 2>&1 | tail -3) || true
+              touch "$DIR/.compiled"
+            fi
+          done
+
+      - name: Install Mason packages
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          export PATH="${PORTABLE_DIR}/bin:$PATH"
+          for PKG in clangd lua-language-server marksman yamlls jsonls neocmake \
+                     stylua clang-format shfmt \
+                     shellcheck cpplint markdownlint-cli2 markdown-toc; do
+            echo "=== Installing: $PKG ==="
+            nvim --headless \
+              "+MasonInstall $PKG" \
+              -c "lua vim.wait(60000, function() return false end, 500)" \
+              +qall! 2>&1 | grep -E "installed|failed|Download" | head -3 || true
+          done
+          ls "${XDG_DATA_HOME}/nvim/mason/packages/" 2>/dev/null || true
+
+      - name: GLIBC compatibility report (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          echo "=== GLIBC Compatibility ===" > "${PORTABLE_DIR}/GLIBC_REPORT.txt"
+          for BIN in "${PORTABLE_DIR}/bin/nvim" "${PORTABLE_DIR}/node/bin/node" \
+                     $(find "${PORTABLE_DIR}/data/nvim/mason/bin" -type f 2>/dev/null) \
+                     $(find "${PORTABLE_DIR}/data/nvim" -name "*.so" 2>/dev/null); do
+            if [ -f "$BIN" ] && file "$BIN" | grep -qi elf; then
+              echo "--- $(basename "$BIN") ---" >> "${PORTABLE_DIR}/GLIBC_REPORT.txt"
+              readelf -V "$BIN" 2>/dev/null | grep -oP 'GLIBC_\d+\.\d+' \
+                | sort -t_ -k2 -Vru >> "${PORTABLE_DIR}/GLIBC_REPORT.txt" || true
+            fi
+          done
+
+      - name: Cleanup
+        shell: bash
+        run: |
+          find "${PORTABLE_DIR}/data/nvim/lazy" -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true
+          find "${PORTABLE_DIR}/data/nvim" -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true
+          rm -rf "${XDG_DATA_HOME}/nvim/mason/.packages" 2>/dev/null || true
+          rm -rf "${XDG_DATA_HOME}/nvim/mason/staging" 2>/dev/null || true
+          find "${PORTABLE_DIR}/bin" -name "*.zsync" -delete 2>/dev/null || true
+          du -sh "${PORTABLE_DIR}"
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          EXT="${{ matrix.artifact_ext }}"
+          ARTIFACT_NAME="nvim-portable-${{ matrix.os }}-${ARCH}-${VER}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_file=${ARTIFACT_NAME}.${EXT}" >> $GITHUB_OUTPUT
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            cd work && 7z a "../${ARTIFACT_NAME}.${EXT}" portable/ && cd ..
+          else
+            cd work && tar czf "../${ARTIFACT_NAME}.${EXT}" portable/ && cd ..
+          fi
+          echo "Package: ${ARTIFACT_NAME}.${EXT} ($(du -sh ${ARTIFACT_NAME}.${EXT} | cut -f1))"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.artifact_file }}
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILES=$(find artifacts -type f | tr '\n' ' ')
+          TAG="${{ needs.build.outputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v$(date +%Y%m%d)"
+          fi
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "NVim Portable ${TAG}" \
+            --notes "## NVim Portable ${TAG}$(echo; echo 'Built from neovim-releases.'; echo '### Included'; echo '- Neovim + LazyVim plugins (locked)'; echo '- Treesitter parsers (zig-cc, glibc 2.17)'; echo '- Mason LSP/formatter/linter'; echo '- Node.js v16 (Linux only)'; echo; echo '### Usage'; echo '```bash'; echo 'tar xzf nvim-portable-*.tar.gz && cd portable && ./nvim.sh'; echo '```')" \
+            $FILES
+          echo "Release created: ${TAG}"
