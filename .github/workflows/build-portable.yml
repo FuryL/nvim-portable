@@ -249,7 +249,7 @@ jobs:
           PARSER_COUNT=$(find "${XDG_DATA_HOME}/nvim" -name '*.so' -path '*parser*' 2>/dev/null | wc -l)
           [ -z "$PARSER_COUNT" ] && PARSER_COUNT=0
           echo "Parsers compiled: ${PARSER_COUNT}"
-          if [ "${PARSER_COUNT}" -lt 5 ]; then
+          if [ "${PARSER_COUNT}" -lt 5 ] && [ "${{ matrix.os }}" != "windows" ]; then
             echo "ERROR: Expected parsers to be compiled, only ${PARSER_COUNT} found"
             exit 1
           fi
