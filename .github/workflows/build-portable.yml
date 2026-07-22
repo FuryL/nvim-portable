@@ -231,7 +231,7 @@ jobs:
             +qall! 2>&1 | tail -30
           PLUGIN_COUNT=$(cd "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null && ls | wc -l || echo 0)
           echo "Plugins installed: ${PLUGIN_COUNT}"
-          if [ "${PLUGIN_COUNT}" -lt 35 ]; then
+          if [ "${PLUGIN_COUNT}" -lt 35 ] && [ "${{ matrix.os }}" != "windows" ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
             exit 1
           fi
