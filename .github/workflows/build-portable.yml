@@ -354,27 +354,29 @@ jobs:
 
       - name: Build blink_cmp_fuzzy (Windows)
         if: matrix.os == 'windows'
-        shell: bash
+        shell: pwsh
         timeout-minutes: 15
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable-msvc
-          source "$HOME/.cargo/env"
-          BLINK_DIR="${XDG_DATA_HOME}/nvim/lazy/blink.cmp"
-          if [ -d "$BLINK_DIR" ]; then
-            cd "$BLINK_DIR"
+          Invoke-WebRequest -Uri https://sh.rustup.rs -OutFile rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain stable-msvc
+          $env:Path += ";$env:USERPROFILE\.cargo\bin"
+
+          $BLINK_DIR = "$env:XDG_DATA_HOME\nvim\lazy\blink.cmp"
+          if (Test-Path $BLINK_DIR) {
+            Set-Location $BLINK_DIR
             cargo build --release
-            DLL="target/release/blink_cmp_fuzzy.dll"
-            if [ -f "$DLL" ]; then
-              mkdir -p "$BLINK_DIR/lib"
-              cp "$DLL" "$BLINK_DIR/lib/"
-              echo "fuzzy lib → $BLINK_DIR/lib/blink_cmp_fuzzy.dll"
-            else
-              echo "WARNING: $DLL not found (MSVC), trying find..."
-              find target -name "*.dll" -type f 2>/dev/null | head -5
-            fi
-          else
-            echo "blink.cmp not found, skipping"
-          fi
+            $DLL = "target\release\blink_cmp_fuzzy.dll"
+            if (Test-Path $DLL) {
+              New-Item -ItemType Directory -Force -Path "$BLINK_DIR\lib" | Out-Null
+              Copy-Item $DLL "$BLINK_DIR\lib\"
+              Write-Host "fuzzy lib -> $BLINK_DIR\lib\blink_cmp_fuzzy.dll"
+            } else {
+              Write-Host "WARNING: $DLL not found (MSVC)"
+              Get-ChildItem target -Recurse -Name "*.dll" | Select-Object -First 5
+            }
+          } else {
+            Write-Host "blink.cmp not found, skipping"
+          }
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
