@@ -216,7 +216,7 @@ jobs:
 
       - name: Sync LazyVim plugins
         shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           export PATH="${PORTABLE_DIR}/bin:$PATH"
           NVIM_BIN="${PORTABLE_DIR}/bin/nvim"
@@ -230,6 +230,14 @@ jobs:
             -c "lua vim.wait(300000, function() return false end, 500)" \
             +qall! 2>&1 | tail -30
           PLUGIN_COUNT=$(cd "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null && ls | wc -l || echo 0)
+          echo "Plugins installed after first sync: ${PLUGIN_COUNT}"
+          if [ "${PLUGIN_COUNT}" -lt 40 ] && [ "${{ matrix.os }}" != "windows" ]; then
+            echo "WARN: ${PLUGIN_COUNT} plugins, retrying sync..."
+            nvim --headless '+Lazy! sync' \
+              -c "lua vim.wait(180000, function() return false end, 500)" \
+              +qall! 2>&1 | tail -10
+            PLUGIN_COUNT=$(cd "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null && ls | wc -l || echo 0)
+          fi
           echo "Plugins installed: ${PLUGIN_COUNT}"
           if [ "${PLUGIN_COUNT}" = "0" ] && [ "${{ matrix.os }}" = "windows" ]; then
             echo "  (Windows count unavailable — treesitter 36/36 confirms installation)"
@@ -295,8 +303,13 @@ jobs:
       - name: Cleanup
         shell: bash
         run: |
-          find "${PORTABLE_DIR}/data/nvim/lazy" -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true
-          find "${PORTABLE_DIR}/data/nvim" -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true
+          # 只删除 .git 内大文件(objects/refs/logs)，保留 config + HEAD 供 lazy.nvim 读取 origin
+          find "${PORTABLE_DIR}/data/nvim/lazy" -name ".git" -type d -exec sh -c '
+            for gitdir do find "$gitdir" -mindepth 1 -maxdepth 1 ! -name "config" ! -name "HEAD" -exec rm -rf {} +; done
+          ' sh {} + 2>/dev/null || true
+          find "${PORTABLE_DIR}/data/nvim" -name ".git" -type d -exec sh -c '
+            for gitdir do find "$gitdir" -mindepth 1 -maxdepth 1 ! -name "config" ! -name "HEAD" -exec rm -rf {} +; done
+          ' sh {} + 2>/dev/null || true
           rm -rf "${XDG_DATA_HOME}/nvim/mason/.packages" 2>/dev/null || true
           rm -rf "${XDG_DATA_HOME}/nvim/mason/staging" 2>/dev/null || true
           find "${PORTABLE_DIR}/bin" -name "*.zsync" -delete 2>/dev/null || true
