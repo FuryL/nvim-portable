@@ -214,6 +214,20 @@ jobs:
           mv /tmp/node-${NODE_VER}-${{ matrix.node_platform }} "${PORTABLE_DIR}/node"
           "${PORTABLE_DIR}/node/bin/node" --version
 
+      - name: Install lazygit (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          LAZYGIT_VER="v0.63.1"
+          ARCH="${{ matrix.arch }}"
+          echo "Downloading lazygit ${LAZYGIT_VER} for linux/${ARCH}"
+          curl --fail -sL -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/jesseduffield/lazygit/releases/download/${LAZYGIT_VER}/lazygit_${LAZYGIT_VER#v}_linux_${ARCH}.tar.gz" \
+            -o /tmp/lazygit.tar.gz
+          tar xzf /tmp/lazygit.tar.gz -C /tmp lazygit
+          mv /tmp/lazygit "${PORTABLE_DIR}/bin/"
+          "${PORTABLE_DIR}/bin/lazygit" --version
+
       - name: Sync LazyVim plugins
         shell: bash
         timeout-minutes: 15
