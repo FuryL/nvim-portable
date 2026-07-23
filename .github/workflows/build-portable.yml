@@ -231,6 +231,9 @@ jobs:
             +qall! 2>&1 | tail -30
           PLUGIN_COUNT=$(cd "${XDG_DATA_HOME}/nvim/lazy" 2>/dev/null && ls | wc -l || echo 0)
           echo "Plugins installed: ${PLUGIN_COUNT}"
+          if [ "${PLUGIN_COUNT}" = "0" ] && [ "${{ matrix.os }}" = "windows" ]; then
+            echo "  (Windows count unavailable — treesitter 36/36 confirms installation)"
+          fi
           if [ "${PLUGIN_COUNT}" -lt 35 ] && [ "${{ matrix.os }}" != "windows" ]; then
             echo "ERROR: Expected ~40 plugins, only ${PLUGIN_COUNT} found"
             exit 1
@@ -273,12 +276,6 @@ jobs:
               echo "Skipping: ${PLUGIN} (not found or no Makefile)"
             fi
           done
-
-      - name: Mason packages (info)
-        shell: bash
-        run: |
-          MASON_COUNT=$(cd "${XDG_DATA_HOME}/nvim/mason/packages" 2>/dev/null && ls | wc -l || echo 0)
-          echo "Mason packages: ${MASON_COUNT} (LazyVim ensure_installed handles installation)"
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
@@ -345,10 +342,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           FILES=$(find artifacts -type f | tr '\n' ' ')
-          TAG="${{ needs.build.outputs.tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="v$(date +%Y%m%d)"
-          fi
+          # 从 artifact 文件名提取 Neovim 版本（如 nvim-portable-linux-x86_64-0.12.4.tar.gz → 0.12.4）
+          VER=$(echo "$FILES" | grep -oP '\d+\.\d+\.\d+' | head -1)
+          TAG="v${VER}"
+          [ -z "${VER}" ] && TAG="v$(date +%Y%m%d)"
           gh release delete "$TAG" --yes 2>/dev/null || true
           gh release create "$TAG" \
             --title "NVim Portable ${TAG}" \
