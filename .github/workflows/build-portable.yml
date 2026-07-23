@@ -335,7 +335,6 @@ jobs:
           BLINK_DIR="${XDG_DATA_HOME}/nvim/lazy/blink.cmp"
           if [ -d "$BLINK_DIR" ]; then
             cd "$BLINK_DIR"
-            export CC=zigcc
             HOST=$(rustc -vV | grep host | awk '{print $2}')
             RUST_TARGET=$(echo "$HOST" | tr '-' '_' | tr 'a-z' 'A-Z')
             export "CARGO_TARGET_${RUST_TARGET}_LINKER=zigcc"
