@@ -228,6 +228,32 @@ jobs:
           mv /tmp/lazygit "${PORTABLE_DIR}/bin/"
           "${PORTABLE_DIR}/bin/lazygit" --version
 
+      - name: Install fd (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          FD_VER="v10.2.0"
+          FD_ARCH="${{ matrix.arch == 'x86_64' && 'x86_64' || 'aarch64' }}"
+          echo "Downloading fd ${FD_VER} for ${FD_ARCH}"
+          curl --fail -sL \
+            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER#v}-${FD_ARCH}-unknown-linux-musl.tar.gz" \
+            | tar xzf - -C /tmp --strip-components=1
+          mv /tmp/fd "${PORTABLE_DIR}/bin/"
+          "${PORTABLE_DIR}/bin/fd" --version
+
+      - name: Install fd (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          FD_VER="v10.2.0"
+          echo "Downloading fd ${FD_VER} for Windows"
+          curl --fail -sL \
+            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER#v}-x86_64-pc-windows-msvc.zip" \
+            -o /tmp/fd.zip
+          7z x /tmp/fd.zip -o/tmp/fd
+          mv /tmp/fd/fd-*/fd.exe "${PORTABLE_DIR}/bin/"
+          "${PORTABLE_DIR}/bin/fd" --version
+
       - name: Sync LazyVim plugins
         shell: bash
         timeout-minutes: 15
@@ -298,6 +324,58 @@ jobs:
               echo "Skipping: ${PLUGIN} (not found or no Makefile)"
             fi
           done
+
+      - name: Build blink_cmp_fuzzy (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          source "$HOME/.cargo/env"
+          BLINK_DIR="${XDG_DATA_HOME}/nvim/lazy/blink.cmp"
+          if [ -d "$BLINK_DIR" ]; then
+            cd "$BLINK_DIR"
+            export CC=zigcc
+            HOST=$(rustc -vV | grep host | awk '{print $2}')
+            RUST_TARGET=$(echo "$HOST" | tr '-' '_' | tr 'a-z' 'A-Z')
+            export "CARGO_TARGET_${RUST_TARGET}_LINKER=zigcc"
+            cargo build --release
+            SO=$(find . -name '*.so' -path '*/release/*' | head -1)
+            if [ -n "$SO" ]; then
+              mkdir -p "$BLINK_DIR/lib"
+              cp "$SO" "$BLINK_DIR/lib/libblink_cmp_fuzzy.so"
+              echo "fuzzy lib → $BLINK_DIR/lib/libblink_cmp_fuzzy.so"
+            else
+              echo "ERROR: no .so after cargo build"
+              exit 1
+            fi
+          else
+            echo "blink.cmp not found, skipping"
+          fi
+
+      - name: Build blink_cmp_fuzzy (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          source "$HOME/.cargo/env"
+          BLINK_DIR="${XDG_DATA_HOME}/nvim/lazy/blink.cmp"
+          if [ -d "$BLINK_DIR" ]; then
+            cd "$BLINK_DIR"
+            cargo build --release
+            DLL=$(find . -name '*.dll' -path '*/release/*' | head -1)
+            if [ -n "$DLL" ]; then
+              mkdir -p "$BLINK_DIR/lib"
+              cp "$DLL" "$BLINK_DIR/lib/blink_cmp_fuzzy.dll"
+              echo "fuzzy lib → $BLINK_DIR/lib/blink_cmp_fuzzy.dll"
+            else
+              echo "ERROR: no .dll after cargo build"
+              exit 1
+            fi
+          else
+            echo "blink.cmp not found, skipping"
+          fi
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
