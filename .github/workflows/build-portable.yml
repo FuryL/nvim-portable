@@ -236,7 +236,7 @@ jobs:
           FD_ARCH="${{ matrix.arch == 'x86_64' && 'x86_64' || 'aarch64' }}"
           echo "Downloading fd ${FD_VER} for ${FD_ARCH}"
           curl --fail -sL \
-            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER#v}-${FD_ARCH}-unknown-linux-musl.tar.gz" \
+            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER}-${FD_ARCH}-unknown-linux-musl.tar.gz" \
             | tar xzf - -C /tmp --strip-components=1
           mv /tmp/fd "${PORTABLE_DIR}/bin/"
           "${PORTABLE_DIR}/bin/fd" --version
@@ -248,7 +248,7 @@ jobs:
           FD_VER="v10.2.0"
           echo "Downloading fd ${FD_VER} for Windows"
           curl --fail -sL \
-            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER#v}-x86_64-pc-windows-msvc.zip" \
+            "https://github.com/sharkdp/fd/releases/download/${FD_VER}/fd-${FD_VER}-x86_64-pc-windows-msvc.zip" \
             -o /tmp/fd.zip
           7z x /tmp/fd.zip -o/tmp/fd
           mv /tmp/fd/fd-*/fd.exe "${PORTABLE_DIR}/bin/"
