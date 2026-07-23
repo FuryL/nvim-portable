@@ -363,13 +363,14 @@ jobs:
           if [ -d "$BLINK_DIR" ]; then
             cd "$BLINK_DIR"
             cargo build --release
-            DLL=$(find . -name '*.dll' -path '*/release/*' | head -1)
-            if [ -n "$DLL" ]; then
+            DLL="target/release/blink_cmp_fuzzy.dll"
+            if [ -f "$DLL" ]; then
               mkdir -p "$BLINK_DIR/lib"
-              cp "$DLL" "$BLINK_DIR/lib/blink_cmp_fuzzy.dll"
+              cp "$DLL" "$BLINK_DIR/lib/"
               echo "fuzzy lib → $BLINK_DIR/lib/blink_cmp_fuzzy.dll"
             else
-              echo "ERROR: no .dll after cargo build"
+              echo "ERROR: $DLL not found after cargo build"
+              ls target/release/*.dll 2>/dev/null || echo "(no .dll files in target/release)"
               exit 1
             fi
           else
