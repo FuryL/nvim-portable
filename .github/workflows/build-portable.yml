@@ -357,23 +357,7 @@ jobs:
         shell: bash
         timeout-minutes: 15
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          source "$HOME/.cargo/env"
-          BLINK_DIR="${XDG_DATA_HOME}/nvim/lazy/blink.cmp"
-          if [ -d "$BLINK_DIR" ]; then
-            cd "$BLINK_DIR"
-            cargo build --release
-            DLL="target/release/blink_cmp_fuzzy.dll"
-            if [ -f "$DLL" ]; then
-              mkdir -p "$BLINK_DIR/lib"
-              cp "$DLL" "$BLINK_DIR/lib/"
-              echo "fuzzy lib → $BLINK_DIR/lib/blink_cmp_fuzzy.dll"
-            else
-              echo "WARNING: no .dll found (Windows RMS toolbox issue), skipping"
-            fi
-          else
-            echo "blink.cmp not found, skipping"
-          fi
+          echo "Windows blink_cmp_fuzzy skipped (GNU toolchain compat issue — will fallback to Lua matcher)"
 
       - name: GLIBC compatibility report (Linux)
         if: matrix.os == 'linux'
